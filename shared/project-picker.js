@@ -12,6 +12,15 @@
  *     .then(function (project) {
  *       // project is { id, canonical_name } or null if the user cancelled
  *     });
+ *
+ * Pass excludeDelivered: true to hide already-delivered projects from the
+ * visible suggestion list (roadmap uses this — intake, where delivered
+ * gets set, still shows everything). The exact-match check that decides
+ * whether to offer "Create new project" always looks at the full,
+ * unfiltered set, so typing a delivered project's exact name can't create
+ * an accidental duplicate — it just won't show as a clickable suggestion.
+ * schedule-a doesn't use this component (it has its own inline datalist
+ * typeahead) but applies the same filtering principle independently.
  */
 (function () {
   'use strict';
@@ -71,6 +80,7 @@
     options = options || {};
     var originApp = options.originApp;
     var initialQuery = options.query || '';
+    var excludeDelivered = !!options.excludeDelivered;
     var sb = window.sbClient;
 
     return new Promise(function (resolve) {
@@ -122,14 +132,16 @@
       closeBtn.addEventListener('click', function () { finish(null); });
 
       function renderResults(projects, query) {
+        var visible = excludeDelivered ? projects.filter(function (p) { return !p.delivered; }) : projects;
+
         resultsEl.innerHTML = '';
-        if (!projects.length) {
+        if (!visible.length) {
           var empty = document.createElement('div');
           empty.className = 'pp-empty';
           empty.textContent = query.trim() ? 'No matching projects.' : 'Type to search existing projects.';
           resultsEl.appendChild(empty);
         } else {
-          projects.forEach(function (p) {
+          visible.forEach(function (p) {
             var row = document.createElement('button');
             row.type = 'button';
             row.className = 'pp-result';
@@ -142,6 +154,9 @@
         createRowEl.innerHTML = '';
         var trimmed = query.trim();
         if (!trimmed) return;
+        // Checked against the full (unfiltered) set, not `visible` — so a
+        // name collision with a hidden delivered project still suppresses
+        // "Create new" instead of letting a duplicate get created.
         var exact = projects.some(function (p) {
           return p.canonical_name.toLowerCase() === trimmed.toLowerCase();
         });
@@ -164,7 +179,7 @@
         }
         var token = ++searchToken;
         sb.from('projects')
-          .select('id, canonical_name')
+          .select('id, canonical_name, delivered')
           .ilike('canonical_name', '%' + escapeLike(trimmed) + '%')
           .order('canonical_name')
           .limit(20)
