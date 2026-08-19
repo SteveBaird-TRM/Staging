@@ -1386,6 +1386,12 @@
     panel.appendChild(footer);
   }
 
+  function refreshProjectLinkRow(card) {
+    var panel = document.getElementById("panel");
+    var old = panel && panel.querySelector(".project-link-row");
+    if (old) old.replaceWith(buildProjectLinkRow(card));
+  }
+
   function buildProjectLinkRow(card) {
     var row = document.createElement("div");
     row.className = "project-link-row";
@@ -1426,7 +1432,39 @@
       card.projectId = project.id;
       card.projectName = project.canonical_name;
       persistCard(card);
-      renderPanel();
+      refreshProjectLinkRow(card);
+    });
+  }
+
+  // Called when the project title field loses focus. If the card isn't
+  // linked yet, silently link it to an exact-name match in the projects
+  // registry, or create one if none exists — this is the "type a title and
+  // it just works" path; deliberately-different-wording matches across
+  // apps still go through the explicit picker (linkProject) so we don't
+  // blind-merge two different real projects on a fuzzy guess.
+  function autoLinkProject(card) {
+    if (!canEdit()) return;
+    if (card.projectId) return;
+    var title = (card.projectTitle || "").trim();
+    if (!title) return;
+    sb.from("projects").select("id, canonical_name").ilike("canonical_name", title).limit(1).then(function (res) {
+      if (res.error) { console.error(res.error); return; }
+      if (card.projectId) return; // a manual link may have landed while this was in flight
+      if (res.data && res.data.length) {
+        card.projectId = res.data[0].id;
+        card.projectName = res.data[0].canonical_name;
+        persistCard(card);
+        refreshProjectLinkRow(card);
+        return;
+      }
+      sb.from("projects").insert({ canonical_name: title, origin_app: "intake" }).select("id, canonical_name").single().then(function (res2) {
+        if (res2.error) { console.error(res2.error); return; }
+        if (card.projectId) return;
+        card.projectId = res2.data.id;
+        card.projectName = res2.data.canonical_name;
+        persistCard(card);
+        refreshProjectLinkRow(card);
+      });
     });
   }
 
@@ -1515,6 +1553,9 @@
           }
           updateCardField(card.id, f.key, val);
         });
+        if (f.key === "projectTitle") {
+          input.addEventListener("blur", function () { autoLinkProject(card); });
+        }
       }
     }
     wrap.appendChild(input);
