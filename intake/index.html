@@ -1313,11 +1313,17 @@
 
   function commitDomOrder() {
     var order = [];
+    var deliveredChanges = [];
     document.querySelectorAll(".column-body").forEach(function (body) {
       var status = body.dataset.status;
       body.querySelectorAll(".card").forEach(function (cardEl) {
         var card = state.cards.find(function (c) { return c.id === cardEl.dataset.id; });
         if (card) {
+          var wasDelivered = card.status === "delivered";
+          var isDelivered = status === "delivered";
+          if (wasDelivered !== isDelivered) {
+            deliveredChanges.push({ projectId: card.projectId, delivered: isDelivered });
+          }
           card.status = status;
           order.push(card);
         }
@@ -1329,6 +1335,7 @@
     }
     persistAll(state.cards);
     renderBoard();
+    deliveredChanges.forEach(function (c) { setProjectDelivered(c.projectId, c.delivered); });
   }
 
   function renderPanel() {
@@ -1592,15 +1599,30 @@
     return Math.round(score * 100) / 100;
   }
 
+  // Keeps a linked project's delivered flag in sync with a card's status —
+  // set true when a card reaches "delivered", set back to false if it's
+  // moved off that status. Fires from the status dropdown (updateCardField)
+  // and from dragging a card between columns (commitDomOrder).
+  function setProjectDelivered(projectId, delivered) {
+    if (!projectId) return;
+    sb.from("projects").update({ delivered: delivered, updated_at: new Date().toISOString() }).eq("id", projectId).then(function (res) {
+      if (res.error) console.error(res.error);
+    });
+  }
+
   function updateCardField(id, key, value) {
     var card = state.cards.find(function (c) { return c.id === id; });
     if (!card) return;
+    var wasDelivered = card.status === "delivered";
     card[key] = value;
     if (key === "annualValue") {
       card.commercialScore = computeCommercialScore(value);
       var panel = document.getElementById("panel");
       var scoreInput = panel && panel.querySelector('[data-field="commercialScore"] .field-input');
       if (scoreInput) scoreInput.value = card.commercialScore;
+    }
+    if (key === "status" && wasDelivered !== (value === "delivered")) {
+      setProjectDelivered(card.projectId, value === "delivered");
     }
     card.updatedAt = new Date().toISOString();
     persistCard(card);
